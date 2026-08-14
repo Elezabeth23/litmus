@@ -1,5 +1,5 @@
 import React from 'react';
-import { Container, Layout, Text } from '@harnessio/uicore';
+import { Container, Layout, Text, useToaster } from '@harnessio/uicore';
 import { Color, FontVariation } from '@harnessio/design-system';
 import { Classes } from '@blueprintjs/core';
 import { useStrings } from '@strings';
@@ -14,6 +14,9 @@ import {
 } from '@components/ExperimentActionButtons';
 import type { RefetchExperimentRuns, RefetchExperiments } from '@controllers/ExperimentDashboardV2';
 import { ExperimentRunStatus, ExperimentType, InfrastructureType } from '@api/entities';
+import { listExperiment } from '@api/core';
+import { getScope } from '@utils';
+import { cronEnabled } from 'utils';
 
 interface RightSideBarViewV2Props extends Partial<RefetchExperiments>, Partial<RefetchExperimentRuns> {
   experimentID: string;
@@ -23,7 +26,10 @@ interface RightSideBarViewV2Props extends Partial<RefetchExperiments>, Partial<R
   phase: ExperimentRunStatus | undefined;
   loading?: boolean;
   isCronEnabled?: boolean;
+  setIsCronEnabled?: React.Dispatch<React.SetStateAction<boolean | undefined>>;
   isEditMode?: boolean;
+  isExperimentRunning?: boolean;
+  runDisabled?: boolean;
 }
 
 function RightSideBarV2({
@@ -35,11 +41,38 @@ function RightSideBarV2({
   loading,
   isEditMode,
   isCronEnabled,
+  setIsCronEnabled,
+  isExperimentRunning,
+  runDisabled,
   refetchExperiments,
   refetchExperimentRuns
 }: RightSideBarViewV2Props): React.ReactElement {
+  const { showError } = useToaster();
+  const scope = getScope();
+  const { data: experimentList } = listExperiment({
+    ...scope,
+    experimentIDs: [experimentID],
+    options: {
+      onError: err => showError(err.message),
+      fetchPolicy: 'network-only',
+      skip: experimentType !== ExperimentType.CRON
+    }
+  });
+
+  React.useEffect(() => {
+    if (experimentList !== undefined) {
+      const experimentData = experimentList?.listExperiment.experiments.filter(
+        experiment => experiment.experimentID === experimentID
+      )[0];
+      const parsedManifest = JSON.parse(experimentData?.experimentManifest);
+      setIsCronEnabled?.(cronEnabled(parsedManifest));
+    }
+  }, [experimentList]);
+
   const { getString } = useStrings();
-  const showStopButton = phase === ExperimentRunStatus.RUNNING || phase === ExperimentRunStatus.QUEUED;
+  const showStopButton = isEditMode
+    ? isExperimentRunning // In edit mode, only rely on isExperimentRunning prop
+    : isExperimentRunning || phase === ExperimentRunStatus.RUNNING || phase === ExperimentRunStatus.QUEUED;
 
   const showEnableDisableCronButton =
     experimentType && experimentType === ExperimentType.CRON && isCronEnabled !== undefined;
@@ -61,6 +94,7 @@ function RightSideBarV2({
               experimentID={experimentID}
               refetchExperiments={refetchExperiments}
               isCronEnabled={isCronEnabled}
+              setIsCronEnabled={setIsCronEnabled}
             />
             <Text
               style={{ textAlign: 'center' }}
@@ -126,7 +160,7 @@ function RightSideBarV2({
                 tooltipProps={{ disabled: true }}
                 experimentID={experimentID}
                 refetchExperiments={refetchExperiments}
-                // buttonProps={{ disabled: phase === ExperimentRunStatus.QUEUED }}
+                disabled={Boolean(runDisabled)}
               />
               <Text
                 style={{ textAlign: 'center' }}
